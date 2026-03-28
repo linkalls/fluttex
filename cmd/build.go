@@ -44,7 +44,7 @@ func buildFile(inputPath, outPath string) error {
 		outPath = filepath.Join(filepath.Dir(inputPath), base+".dart")
 	}
 
-	if err := os.WriteFile(outPath, []byte(dart), 0644); err != nil {
+	if err := os.WriteFile(outPath, []byte(dart), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", outPath, err)
 	}
 
