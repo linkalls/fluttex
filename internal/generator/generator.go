@@ -255,7 +255,9 @@ func generateElementWithState(n *ast.Node, indent int, stateVars []ast.StateVar)
 		return generateAppBar(n, indent, stateVars)
 	case "listview":
 		return generateListView(n, indent, stateVars)
-	case "span", "text", "p", "label", "h1", "h2", "h3", "h4", "h5", "h6":
+	case "h1", "h2", "h3", "h4", "h5", "h6":
+		return generateHeadingWithState(n, tag, stateVars)
+	case "span", "text", "p", "label":
 		return generateTextWithState(n, stateVars)
 	case "div", "view", "section", "article", "main", "header", "footer", "nav":
 		return generateContainerWithState(n, indent, stateVars)
@@ -297,6 +299,25 @@ func generateTextField(n *ast.Node, indent int) string {
 	return generateTextFieldWithState(n, indent, nil)
 }
 
+// normalizeOnChange rewrites React event-handler patterns into Dart-friendly form.
+// Specifically it transforms `(e) => setter(e.target.value)` → `(value) => setter(value)`
+// so that Flutter's TextField.onChanged (which passes a String directly) is correct.
+var eTargetValueRe = regexp.MustCompile(`(?s)^\((\w+)\)\s*=>(.+)$`)
+
+func normalizeOnChange(handler string) string {
+	m := eTargetValueRe.FindStringSubmatch(strings.TrimSpace(handler))
+	if m == nil {
+		return handler
+	}
+	param := m[1]
+	body := strings.TrimSpace(m[2])
+	if strings.Contains(body, param+".target.value") {
+		body = strings.ReplaceAll(body, param+".target.value", "value")
+		return "(value) => " + body
+	}
+	return handler
+}
+
 func generateTextFieldWithState(n *ast.Node, indent int, stateVars []ast.StateVar) string {
 	var parts []string
 
@@ -304,7 +325,8 @@ func generateTextFieldWithState(n *ast.Node, indent int, stateVars []ast.StateVa
 		parts = append(parts, key)
 	}
 	if v, ok := n.Props["onChange"]; ok && v != "" {
-		parts = append(parts, fmt.Sprintf("onChanged: %s", wrapSetterCalls(v, stateVars)))
+		handler := normalizeOnChange(v)
+		parts = append(parts, fmt.Sprintf("onChanged: %s", wrapSetterCalls(handler, stateVars)))
 	}
 	if v, ok := n.Props["placeholder"]; ok && v != "" {
 		parts = append(parts, fmt.Sprintf("decoration: const InputDecoration(hintText: '%s')", escapeSingleQuote(v)))
@@ -417,15 +439,45 @@ func generateListView(n *ast.Node, indent int, stateVars []ast.StateVar) string 
 	return fmt.Sprintf("ListView(\n%s)", formatArgs(parts, indent+1))
 }
 
+// headingStyles maps h1-h6 tags to Flutter TextTheme getter names.
+var headingStyles = map[string]string{
+	"h1": "headlineLarge",
+	"h2": "headlineMedium",
+	"h3": "headlineSmall",
+	"h4": "titleLarge",
+	"h5": "titleMedium",
+	"h6": "titleSmall",
+}
+
+func generateHeadingWithState(n *ast.Node, tag string, stateVars []ast.StateVar) string {
+	textWidget := generateTextWithState(n, stateVars)
+	styleName, ok := headingStyles[tag]
+	if !ok {
+		return textWidget
+	}
+	// Wrap Text with a style from the theme: replace closing ')' to add style arg
+	if strings.HasPrefix(textWidget, "Text(") && strings.HasSuffix(textWidget, ")") {
+		inner := textWidget[len("Text(") : len(textWidget)-1]
+		return fmt.Sprintf("Text(%s, style: Theme.of(context).textTheme.%s)", inner, styleName)
+	}
+	return textWidget
+}
+
 func generateTextWithState(n *ast.Node, stateVars []ast.StateVar) string {
-	// If there's a direct text child, use it
+	var parts []string
 	for _, c := range n.Children {
 		if c.Type == ast.NodeJSXText {
-			return fmt.Sprintf("Text('%s')", escapeSingleQuote(c.Text))
+			text := c.Text
+			if strings.TrimSpace(text) != "" {
+				parts = append(parts, escapeSingleQuote(text))
+			}
+		} else if c.Type == ast.NodeJSXExpression {
+			parts = append(parts, "${"+c.Expression+"}")
 		}
-		if c.Type == ast.NodeJSXExpression {
-			return fmt.Sprintf("Text(%s.toString())", c.Expression)
-		}
+	}
+	if len(parts) > 0 {
+		combined := strings.Join(parts, "")
+		return fmt.Sprintf("Text('%s')", combined)
 	}
 	// If the element itself has text content (no children)
 	return "Text('')"
