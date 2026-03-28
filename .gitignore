@@ -1,0 +1,5 @@
+fluttex_bin
+test_proj/
+test_find_funcs*
+run_test.sh
+run.go
