@@ -17,7 +17,8 @@ var (
 	arrowDeclRe = regexp.MustCompile(`(?:export\s+(?:default\s+)?)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=]+)?=\s*(?:\([^)]*\)|[A-Za-z_]\w*)(?:\s*:[^=>{]+)?\s*=>\s*`)
 
 	// useStateRe matches: const [name, setter] = useState(initial)
-	useStateRe = regexp.MustCompile(`const\s+\[(\w+),\s*(\w+)\]\s*=\s*useState\(([^)]*)\)`)
+	// Also handles TypeScript generics: useState<Type>(initial)
+	useStateRe = regexp.MustCompile(`const\s+\[(\w+),\s*(\w+)\]\s*=\s*useState[^(]*\(([^)]*)\)`)
 
 	// useEffectRe matches useEffect(() => { body }, [deps])
 	useEffectRe = regexp.MustCompile(`(?s)useEffect\(\s*\(\s*\)\s*=>\s*\{(.*?)\}\s*(?:,\s*(\[[^\]]*\]))?\s*\)`)
@@ -279,6 +280,15 @@ func parseJSX(s string) *ast.Node {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
+	}
+
+	// Parenthesized JSX: (jsx)
+	if strings.HasPrefix(s, "(") {
+		inner, _ := extractParenBody(s, 0)
+		inner = strings.TrimSpace(inner)
+		if inner != "" {
+			return parseJSX(inner)
+		}
 	}
 
 	// JSX Expression: {expr}
@@ -571,6 +581,12 @@ func tryParseMap(expr string) *ast.Node {
 	itemVar := m[2]
 	jsxStr := strings.TrimSpace(m[3])
 
+	// Strip outer parentheses: items.map((item) => (<jsx/>))
+	if strings.HasPrefix(jsxStr, "(") {
+		inner, _ := extractParenBody(jsxStr, 0)
+		jsxStr = strings.TrimSpace(inner)
+	}
+
 	bodyNode := parseJSX(jsxStr)
 	if bodyNode == nil {
 		return nil
@@ -749,8 +765,10 @@ func parseChildren(inner string) []*ast.Node {
 				text = rest[:idx]
 				rest = rest[idx:]
 			}
-			text = strings.TrimSpace(text)
-			if text != "" {
+			// Skip whitespace-only text, but preserve inline spaces (e.g. "Count: " before {count})
+			if strings.TrimSpace(text) != "" {
+				// Trim only leading/trailing line break characters, preserve inline spaces
+				text = strings.TrimRight(text, "\n\r\t")
 				children = append(children, &ast.Node{Type: ast.NodeJSXText, Text: text})
 			}
 		}

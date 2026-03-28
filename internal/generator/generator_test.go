@@ -167,8 +167,8 @@ function Dynamic() {
 	out := compile(tsx)
 	assertContains(t, out, "class Dynamic extends StatefulWidget")
 	assertContains(t, out, "int count = 0;")
-	// The {count} expression should render as a Text widget
-	assertContains(t, out, "count.toString()")
+	// The {count} expression should render as a Text widget with Dart string interpolation
+	assertContains(t, out, "${count}")
 }
 
 func TestConditionalRendering(t *testing.T) {
@@ -339,7 +339,8 @@ function Title() {
   );
 }`
 	out := compile(tsx)
-	assertContains(t, out, "Text('Welcome')")
+	assertContains(t, out, "Text('Welcome'")
+	assertContains(t, out, "headlineLarge")
 }
 
 func TestBooleanStateVar(t *testing.T) {
@@ -365,3 +366,92 @@ function Greeter() {
 	out := compile(tsx)
 	assertContains(t, out, `String name = "World";`)
 }
+
+// ── New Feature Tests ──────────────────────────────────────────────────────────
+
+func TestUseStateWithTypeScriptGenerics(t *testing.T) {
+	tsx := `
+function App() {
+  const [count, setCount] = useState<number>(0);
+  const [name, setName] = useState<string>('');
+  const [items, setItems] = useState<string[]>([]);
+  return (
+    <div>
+      <span>{count}</span>
+    </div>
+  );
+}`
+	out := compile(tsx)
+	assertContains(t, out, "class App extends StatefulWidget")
+	assertContains(t, out, "int count = 0;")
+	assertContains(t, out, "String name = '';")
+	assertContains(t, out, "var items = [];")
+}
+
+func TestMapWithParenthesizedJSX(t *testing.T) {
+	tsx := `
+function List() {
+  return (
+    <div>
+      {items.map((item) => (
+        <span>{item}</span>
+      ))}
+    </div>
+  );
+}`
+	out := compile(tsx)
+	assertContains(t, out, "items.map((item) =>")
+	assertContains(t, out, ".toList()")
+}
+
+func TestMixedTextAndExpression(t *testing.T) {
+	tsx := `
+function App() {
+  const [count, setCount] = useState(0);
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <p>Hello, {name}!</p>
+    </div>
+  );
+}`
+	out := compile(tsx)
+	assertContains(t, out, "Count: ${count}")
+	assertContains(t, out, "Hello, ${name}!")
+}
+
+func TestOnChangeWithEventTarget(t *testing.T) {
+	tsx := `
+function Form() {
+  const [value, setValue] = useState('');
+  return (
+    <input
+      placeholder="Type here"
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+}`
+	out := compile(tsx)
+	assertContains(t, out, "class Form extends StatefulWidget")
+	// (e) => setValue(e.target.value) should become (value) => setState(() { value = value; })
+	assertContains(t, out, "onChanged: (value) =>")
+	assertContains(t, out, "setState(")
+}
+
+func TestHeadingWithStyle(t *testing.T) {
+	tsx := `
+function Page() {
+  return (
+    <div>
+      <h1>Title</h1>
+      <h2>Subtitle</h2>
+      <h3>Section</h3>
+    </div>
+  );
+}`
+	out := compile(tsx)
+	assertContains(t, out, "headlineLarge")
+	assertContains(t, out, "headlineMedium")
+	assertContains(t, out, "headlineSmall")
+}
+
